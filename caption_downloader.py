@@ -1,5 +1,6 @@
 import sys
 import time
+import random
 from pathlib import Path
 from typing import Dict, Any, List
 import re
@@ -107,11 +108,11 @@ def download_captions_with_supadata(video_url: str, output_dir: Path) -> Dict[st
 
     print(f"Using Supadata API for video {video_id}...", file=sys.stderr)
 
-    if not config.SUPADATA_KEY:
-        raise Exception("No Supadata API key found. Please set SUPADATA_KEY in environment")
+    if not config.SUPADATA_KEYS:
+        raise Exception("No Supadata API key found. Please set SUPADATA_KEYS in environment")
 
     try:
-        supadata = Supadata(api_key=config.SUPADATA_KEY)
+        supadata = Supadata(api_key=random.choice(config.SUPADATA_KEYS))
 
         transcript = supadata.transcript(
             url=video_url,
@@ -339,7 +340,7 @@ def download_captions(video_url: str, output_dir: Path) -> Dict[str, Any]:
         errors.append("NoteGPT: playwright not available")
         print(f"Playwright not available, trying Supadata...", file=sys.stderr)
 
-    if SUPADATA_AVAILABLE and config.SUPADATA_KEY:
+    if SUPADATA_AVAILABLE and config.SUPADATA_KEYS:
         try:
             return download_captions_with_supadata(video_url, output_dir)
         except MembersOnlyError:
