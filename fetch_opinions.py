@@ -53,7 +53,12 @@ def get_videos_from_channel(
 
         page_token = None
         collected_ids = []
-        cutoff = datetime.fromisoformat(last_fetched) if last_fetched else None
+        if last_fetched:
+            cutoff = datetime.fromisoformat(last_fetched)
+            if cutoff.tzinfo is None:
+                cutoff = cutoff.replace(tzinfo=timezone.utc)
+        else:
+            cutoff = None
         stop_paging = False
 
         while not stop_paging:
