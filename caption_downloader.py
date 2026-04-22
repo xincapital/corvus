@@ -4,6 +4,7 @@ import random
 from pathlib import Path
 from typing import Dict, Any, List
 import re
+import httpx
 import config
 
 try:
@@ -112,7 +113,8 @@ def download_captions_with_supadata(video_url: str, output_dir: Path) -> Dict[st
         raise Exception("No Supadata API key found. Please set SUPADATA_KEYS in environment")
 
     try:
-        supadata = Supadata(api_key=random.choice(config.SUPADATA_KEYS))
+        api_key_used = random.choice(config.SUPADATA_KEYS)
+        supadata = Supadata(api_key=api_key_used)
 
         transcript = supadata.transcript(
             url=video_url,
@@ -126,7 +128,11 @@ def download_captions_with_supadata(video_url: str, output_dir: Path) -> Dict[st
             print(f"Async job {job_id[:8]}..., polling...", file=sys.stderr)
             for _ in range(60):
                 time.sleep(5)
-                resp = supadata._request("GET", f"/transcript/{job_id}")
+                resp = httpx.get(
+                    f"https://api.supadata.ai/v1/transcript/{job_id}",
+                    headers={"x-api-key": api_key_used},
+                    timeout=30,
+                ).json()
                 status = resp.get("status")
                 if status == "completed":
                     transcript = Transcript(**{k: v for k, v in resp.items() if k != "status"})

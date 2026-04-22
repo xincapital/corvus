@@ -6,3 +6,4 @@ supadata==1.6.0
 psycopg2-binary==2.9.12
 isodate==0.7.2
 python-dotenv==1.0.1
+httpx==0.28.1
