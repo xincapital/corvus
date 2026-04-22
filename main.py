@@ -66,7 +66,8 @@ def process_video(conn, channel_id, video, tmp_dir):
 
     try:
         result = download_captions(video['url'], tmp_dir)
-        transcript_text = open(result['caption_file']).read()
+        with open(result['caption_file'], encoding='utf-8') as fh:
+            transcript_text = fh.read()
     except MembersOnlyError:
         print(f"    Skipped (members-only): {video_id}")
         return
