@@ -102,7 +102,7 @@ def get_videos_from_channel(
             batch = collected_ids[batch_start:batch_start + 50]
             ids_str = ','.join(vid_id for vid_id, _ in batch)
             vid_resp = youtube.videos().list(
-                part='contentDetails,liveStreamingDetails,snippet',
+                part='contentDetails,snippet',
                 id=ids_str
             ).execute()
 
