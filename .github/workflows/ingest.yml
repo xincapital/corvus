@@ -28,5 +28,5 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
-          SUPADATA_KEY: ${{ secrets.SUPADATA_KEY }}
+          SUPADATA_KEYS: ${{ secrets.SUPADATA_KEYS }}
         run: python main.py
