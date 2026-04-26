@@ -102,7 +102,7 @@ def get_videos_from_channel(
             batch = collected_ids[batch_start:batch_start + 50]
             ids_str = ','.join(vid_id for vid_id, _ in batch)
             vid_resp = youtube.videos().list(
-                part='contentDetails,snippet',
+                part='contentDetails,snippet,statistics',
                 id=ids_str
             ).execute()
 
@@ -130,6 +130,7 @@ def get_videos_from_channel(
                     'published_at': published_at.isoformat(),
                     'url': url,
                     'description': v['snippet'].get('description', ''),
+                    'view_count': int(v.get('statistics', {}).get('viewCount', 0) or 0),
                 })
 
                 if not last_fetched:
