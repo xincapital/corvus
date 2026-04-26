@@ -78,8 +78,8 @@ def process_video(conn, channel_id, video, tmp_dir):
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO videos (video_id, channel_id, title, description,
-                                published_at, duration_seconds, transcript_compressed)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                published_at, duration_seconds, transcript_compressed, view_count)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (video_id) DO NOTHING
         """, (
             video_id,
@@ -89,6 +89,7 @@ def process_video(conn, channel_id, video, tmp_dir):
             video['published_at'],
             video['duration'],
             transcript_text,
+            video.get('view_count'),
         ))
     conn.commit()
 
