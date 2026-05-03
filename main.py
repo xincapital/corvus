@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+from pathlib import Path
 import psycopg2
 import config
 from fetch_opinions import get_videos_from_channel
@@ -66,7 +67,7 @@ def process_video(conn, channel_id, video, tmp_dir):
     print(f"  Processing video: {video['title'][:60]}")
 
     try:
-        result = download_captions(video['url'], tmp_dir)
+        result = download_captions(video['url'], Path(tmp_dir))
         with open(result['caption_file'], encoding='utf-8') as fh:
             transcript_text = fh.read()
     except MembersOnlyError:
