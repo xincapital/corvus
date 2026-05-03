@@ -30,6 +30,7 @@ def get_active_channels(conn):
             FROM channels c
             JOIN channel_subscriptions cs ON c.channel_id = cs.channel_id
             WHERE cs.is_active = TRUE
+              AND cs.is_paused_by_downgrade = FALSE
             GROUP BY c.channel_id, c.last_fetched
         """)
         return cur.fetchall()
