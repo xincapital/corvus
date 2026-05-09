@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 import tempfile
 from pathlib import Path
@@ -9,16 +8,7 @@ from fetch_opinions import get_videos_from_channel
 from caption_downloader import download_captions, MembersOnlyError
 
 
-_URL_RE = re.compile(r'https?://')
-_HASHTAG_RE = re.compile(r'#\w+')
 _MAX_TRANSCRIPT_RETRIES = 5
-
-
-def is_description_only(transcript: str) -> bool:
-    """Return True if the stored transcript looks like a YouTube description, not real captions."""
-    url_count = len(_URL_RE.findall(transcript))
-    hashtag_count = len(_HASHTAG_RE.findall(transcript))
-    return url_count >= 2 or hashtag_count >= 3
 
 
 def main():
@@ -32,7 +22,7 @@ def main():
             print(f"Processing channel: {channel_id}")
             process_channel(conn, channel_id, last_fetched, min_duration_seconds)
 
-        retry_description_only_transcripts(conn)
+        retry_null_transcripts(conn)
 
     finally:
         conn.close()
@@ -89,8 +79,8 @@ def process_video(conn, channel_id, video, tmp_dir):
         print(f"    Skipped (members-only): {video_id}")
         return
     except Exception as e:
-        print(f"    Transcript fallback (title+desc): {e}")
-        transcript_text = f"{video['title']}\n\n{video.get('description', '')}"
+        print(f"    Caption download failed, storing NULL transcript: {e}", file=sys.stderr)
+        transcript_text = None
 
     with conn.cursor() as cur:
         cur.execute("""
@@ -111,29 +101,29 @@ def process_video(conn, channel_id, video, tmp_dir):
     conn.commit()
 
 
-def retry_description_only_transcripts(conn) -> None:
-    """Re-fetch captions for videos whose stored transcript is a description fallback.
+def retry_null_transcripts(conn) -> None:
+    """Re-fetch captions for videos with NULL transcript_compressed.
 
-    Runs after new-video ingestion. For each video with a description-only transcript
+    Runs after new-video ingestion. For each video with a NULL transcript
     and fewer than _MAX_TRANSCRIPT_RETRIES attempts, tries to download real captions.
     On success: overwrites transcript_compressed and resets the counter.
-    On failure: increments transcript_fetch_attempts (summarizer will give up at >= 5).
+    On failure: increments transcript_fetch_attempts.
     """
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT video_id, transcript_compressed
+            SELECT video_id
             FROM videos
-            WHERE transcript_fetch_attempts < %s
+            WHERE transcript_compressed IS NULL AND transcript_fetch_attempts < %s
         """, (_MAX_TRANSCRIPT_RETRIES,))
         rows = cur.fetchall()
 
-    candidates = [(vid_id, t) for vid_id, t in rows if is_description_only(t)]
+    candidates = [vid_id for (vid_id,) in rows]
     if not candidates:
         return
 
-    print(f"Retrying caption download for {len(candidates)} description-only videos")
+    print(f"Retrying caption download for {len(candidates)} videos with NULL transcript")
     with tempfile.TemporaryDirectory() as tmp_dir:
-        for video_id, _ in candidates:
+        for video_id in candidates:
             video_url = f"https://www.youtube.com/watch?v={video_id}"
             try:
                 result = download_captions(video_url, Path(tmp_dir))
@@ -148,7 +138,10 @@ def retry_description_only_transcripts(conn) -> None:
                 conn.commit()
                 print(f"  Re-fetched transcript for {video_id} ({len(transcript_text)} chars)")
             except MembersOnlyError:
-                print(f"  Skipped {video_id}: members-only content")
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE videos SET transcript_fetch_attempts = 5 WHERE video_id = %s", (video_id,))
+                conn.commit()
+                print(f"  {video_id}: members-only, permanently skipped (attempts=5)")
             except Exception as e:
                 with conn.cursor() as cur:
                     cur.execute("""
