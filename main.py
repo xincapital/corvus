@@ -18,9 +18,9 @@ def main():
         channels = get_active_channels(conn)
         print(f"Found {len(channels)} active channels")
 
-        for channel_id, last_fetched, min_duration_seconds in channels:
+        for channel_id, last_fetched in channels:
             print(f"Processing channel: {channel_id}")
-            process_channel(conn, channel_id, last_fetched, min_duration_seconds)
+            process_channel(conn, channel_id, last_fetched)
 
         retry_null_transcripts(conn)
 
@@ -31,22 +31,20 @@ def main():
 def get_active_channels(conn):
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT DISTINCT c.channel_id, c.last_fetched,
-                   MIN(cs.min_duration_seconds) as min_duration_seconds
+            SELECT DISTINCT c.channel_id, c.last_fetched
             FROM channels c
             JOIN channel_subscriptions cs ON c.channel_id = cs.channel_id
             WHERE cs.is_active = TRUE
               AND cs.is_paused_by_downgrade = FALSE
-            GROUP BY c.channel_id, c.last_fetched
         """)
         return cur.fetchall()
 
 
-def process_channel(conn, channel_id, last_fetched, min_duration_seconds):
+def process_channel(conn, channel_id, last_fetched):
     channel_url = f"https://www.youtube.com/channel/{channel_id}"
     last_fetched_str = last_fetched.isoformat() if last_fetched else None
 
-    videos = get_videos_from_channel(channel_url, last_fetched_str, min_duration_seconds)
+    videos = get_videos_from_channel(channel_url, last_fetched_str)
 
     if not videos:
         print(f"  No new videos for {channel_id}")

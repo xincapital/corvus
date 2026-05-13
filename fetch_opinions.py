@@ -37,7 +37,6 @@ def _resolve_channel_id(youtube, channel_url: str) -> Optional[str]:
 def get_videos_from_channel(
     channel_url: str,
     last_fetched: Optional[str],
-    min_duration_seconds: int = 600,
 ) -> List[Dict[str, Any]]:
     videos = []
 
@@ -119,7 +118,7 @@ def get_videos_from_channel(
                 if duration_s == 0:
                     continue
 
-                if duration_s < min_duration_seconds:
+                if duration_s < 600:
                     continue
 
                 url = f"https://www.youtube.com/watch?v={video_id}"
