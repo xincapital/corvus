@@ -1,4 +1,5 @@
 import re
+import random
 import isodate
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
@@ -8,7 +9,7 @@ import config
 
 
 def _youtube_client():
-    return build('youtube', 'v3', developerKey=config.YOUTUBE_DATA_API_KEY)
+    return build('youtube', 'v3', developerKey=random.choice(config.YOUTUBE_DATA_API_KEYS))
 
 
 def _resolve_channel_id(youtube, channel_url: str) -> Optional[str]:

@@ -27,6 +27,6 @@ jobs:
       - name: Run ingestion pipeline
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
+          YOUTUBE_DATA_API_KEYS: ${{ secrets.YOUTUBE_DATA_API_KEYS }}
           SUPADATA_KEYS: ${{ secrets.SUPADATA_KEYS }}
         run: python main.py
