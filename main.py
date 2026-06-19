@@ -33,9 +33,13 @@ def get_active_channels(conn):
         cur.execute("""
             SELECT DISTINCT c.channel_id, c.last_fetched
             FROM channels c
-            JOIN channel_subscriptions cs ON c.channel_id = cs.channel_id
-            WHERE cs.is_active = TRUE
-              AND cs.is_paused_by_downgrade = FALSE
+            WHERE c.is_blog_source = TRUE
+               OR EXISTS (
+                   SELECT 1 FROM channel_subscriptions cs
+                   WHERE cs.channel_id = c.channel_id
+                     AND cs.is_active = TRUE
+                     AND cs.is_paused_by_downgrade = FALSE
+               )
         """)
         return cur.fetchall()
 
