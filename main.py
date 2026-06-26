@@ -73,21 +73,33 @@ def process_channel(conn, channel_id, last_fetched, limit=None) -> int:
     with tempfile.TemporaryDirectory() as tmp_dir:
         for video in videos:
             process_video(conn, channel_id, video, tmp_dir)
-            # Update last_fetched after each video so a mid-channel timeout
-            # doesn't cause the whole channel to be reprocessed next run.
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE channels SET last_fetched = %s WHERE channel_id = %s",
-                    (video['published_at'], channel_id),
-                )
-            conn.commit()
 
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE channels SET last_fetched = NOW() WHERE channel_id = %s",
+            (channel_id,)
+        )
+    conn.commit()
     print(f"  Updated last_fetched for {channel_id}")
     return len(videos)
 
 
 def process_video(conn, channel_id, video, tmp_dir):
     video_id = video['video_id']
+
+    # Skip transcript download if the video is already in DB with a non-NULL
+    # transcript. This makes the channel loop idempotent: if a previous run
+    # timed out mid-channel, re-running will skip already-fetched videos and
+    # only download transcripts for the ones that weren't reached yet.
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM videos WHERE video_id = %s AND transcript_compressed IS NOT NULL",
+            (video_id,),
+        )
+        if cur.fetchone():
+            print(f"  Skipping (already ingested): {video['title'][:60]}")
+            return
+
     print(f"  Processing video: {video['title'][:60]}")
 
     try:
