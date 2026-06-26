@@ -73,13 +73,15 @@ def process_channel(conn, channel_id, last_fetched, limit=None) -> int:
     with tempfile.TemporaryDirectory() as tmp_dir:
         for video in videos:
             process_video(conn, channel_id, video, tmp_dir)
+            # Update last_fetched after each video so a mid-channel timeout
+            # doesn't cause the whole channel to be reprocessed next run.
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE channels SET last_fetched = %s WHERE channel_id = %s",
+                    (video['published_at'], channel_id),
+                )
+            conn.commit()
 
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE channels SET last_fetched = NOW() WHERE channel_id = %s",
-            (channel_id,)
-        )
-    conn.commit()
     print(f"  Updated last_fetched for {channel_id}")
     return len(videos)
 
