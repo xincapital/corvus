@@ -9,20 +9,30 @@ from caption_downloader import download_captions, MembersOnlyError
 
 
 _MAX_TRANSCRIPT_RETRIES = 5
+# Total videos processed per run (new + retries combined). Prevents timeout on
+# large backlogs. Override via MAX_VIDEOS_PER_RUN env var (0 = unlimited).
+_MAX_VIDEOS_PER_RUN = int(os.environ.get("MAX_VIDEOS_PER_RUN", "150"))
 
 
 def main():
     conn = psycopg2.connect(config.DATABASE_URL)
+    budget = _MAX_VIDEOS_PER_RUN  # remaining slots; None when unlimited
 
     try:
         channels = get_active_channels(conn)
         print(f"Found {len(channels)} active channels")
 
         for channel_id, last_fetched in channels:
+            if budget is not None and budget <= 0:
+                print(f"Video budget exhausted ({_MAX_VIDEOS_PER_RUN}), stopping new-video ingestion")
+                break
             print(f"Processing channel: {channel_id}")
-            process_channel(conn, channel_id, last_fetched)
+            processed = process_channel(conn, channel_id, last_fetched, limit=budget)
+            if budget is not None:
+                budget -= processed
 
-        retry_null_transcripts(conn)
+        retry_limit = budget if (budget is not None and budget > 0) else (0 if budget == 0 else None)
+        retry_null_transcripts(conn, limit=retry_limit)
 
     finally:
         conn.close()
@@ -44,7 +54,8 @@ def get_active_channels(conn):
         return cur.fetchall()
 
 
-def process_channel(conn, channel_id, last_fetched):
+def process_channel(conn, channel_id, last_fetched, limit=None) -> int:
+    """Process new videos for a channel. Returns count of videos processed."""
     channel_url = f"https://www.youtube.com/channel/{channel_id}"
     last_fetched_str = last_fetched.isoformat() if last_fetched else None
 
@@ -52,7 +63,10 @@ def process_channel(conn, channel_id, last_fetched):
 
     if not videos:
         print(f"  No new videos for {channel_id}")
-        return
+        return 0
+
+    if limit is not None:
+        videos = videos[:limit]
 
     print(f"  Found {len(videos)} new videos")
 
@@ -67,6 +81,7 @@ def process_channel(conn, channel_id, last_fetched):
         )
     conn.commit()
     print(f"  Updated last_fetched for {channel_id}")
+    return len(videos)
 
 
 def process_video(conn, channel_id, video, tmp_dir):
@@ -103,7 +118,7 @@ def process_video(conn, channel_id, video, tmp_dir):
     conn.commit()
 
 
-def retry_null_transcripts(conn) -> None:
+def retry_null_transcripts(conn, limit=None) -> None:
     """Re-fetch captions for videos with NULL transcript_compressed.
 
     Runs after new-video ingestion. For each video with a NULL transcript
@@ -122,6 +137,12 @@ def retry_null_transcripts(conn) -> None:
     candidates = [vid_id for (vid_id,) in rows]
     if not candidates:
         return
+
+    if limit is not None:
+        if limit <= 0:
+            print(f"Video budget exhausted, skipping retry of {len(candidates)} NULL transcripts")
+            return
+        candidates = candidates[:limit]
 
     print(f"Retrying caption download for {len(candidates)} videos with NULL transcript")
     with tempfile.TemporaryDirectory() as tmp_dir:
