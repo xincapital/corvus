@@ -1,0 +1,19 @@
+name: Keepalive Workflows
+
+on:
+  schedule:
+    - cron: '0 0 1,15 * *'  # Run on the 1st and 15th of every month
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Keepalive Workflow
+        uses: gautamkrishnar/keepalive-workflow@v2
+        with:
+          time_elapsed: 25
