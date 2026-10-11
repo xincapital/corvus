@@ -36,6 +36,11 @@ class TestIsMembersOnlyError:
         "channel membership",
         "private video",
         "this video is private",
+        "video unavailable",
+        "this video is unavailable",
+        "video is unavailable",
+        "video is private",
+        "sign in if you have been granted access",
         "Error: content available to members only",
         "SupadataError: join this channel to watch",
     ])
@@ -159,3 +164,60 @@ class TestDownloadCaptionsPropagatesMembersOnly:
                     "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                     tmp_path,
                 )
+
+
+class TestDownloadCaptionsWithSupadataFailover:
+    def test_fails_over_to_next_key_on_limit_exceeded(self, tmp_path):
+        from caption_downloader import download_captions_with_supadata
+        from supadata import Transcript
+
+        fake_chunks = [MagicMock(text="hi", offset=0, duration=1000, lang="en")]
+        mock_success_transcript = MagicMock(spec=Transcript, content=fake_chunks)
+
+        mock_client_1 = MagicMock()
+        err_429 = _make_supadata_error("Limit Exceeded | error: limit-exceeded")
+        err_429.error = "limit-exceeded"
+        mock_client_1.transcript.side_effect = err_429
+
+        mock_client_2 = MagicMock()
+        mock_client_2.transcript.return_value = mock_success_transcript
+
+        clients = {"key1": mock_client_1, "key2": mock_client_2}
+
+        def mock_supadata_factory(api_key):
+            return clients[api_key]
+
+        with (
+            patch("caption_downloader.config.SUPADATA_KEYS", ["key1", "key2"]),
+            patch("caption_downloader.Supadata", side_effect=mock_supadata_factory),
+            patch("caption_downloader.SUPADATA_AVAILABLE", True),
+            patch("caption_downloader.random.shuffle", lambda lst: lst.sort()),  # ensure deterministic key1 then key2
+        ):
+            result = download_captions_with_supadata(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                tmp_path,
+            )
+            assert result["video_id"] == "dQw4w9WgXcQ"
+            assert mock_client_1.transcript.called
+            assert mock_client_2.transcript.called
+
+    def test_raises_when_all_keys_exceeded(self, tmp_path):
+        from caption_downloader import download_captions_with_supadata
+
+        mock_client = MagicMock()
+        err_429 = _make_supadata_error("Limit Exceeded | error: limit-exceeded")
+        err_429.error = "limit-exceeded"
+        mock_client.transcript.side_effect = err_429
+
+        with (
+            patch("caption_downloader.config.SUPADATA_KEYS", ["key1", "key2"]),
+            patch("caption_downloader.Supadata", return_value=mock_client),
+            patch("caption_downloader.SUPADATA_AVAILABLE", True),
+        ):
+            with pytest.raises(Exception) as exc_info:
+                download_captions_with_supadata(
+                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    tmp_path,
+                )
+            assert "limit-exceeded" in str(exc_info.value) or "Limit Exceeded" in str(exc_info.value)
+

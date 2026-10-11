@@ -176,9 +176,9 @@ def retry_null_transcripts(conn, limit=None) -> None:
                 print(f"  Re-fetched transcript for {video_id} ({len(transcript_text)} chars)")
             except MembersOnlyError:
                 with conn.cursor() as cur:
-                    cur.execute("UPDATE videos SET transcript_fetch_attempts = 5 WHERE video_id = %s", (video_id,))
+                    cur.execute("DELETE FROM videos WHERE video_id = %s", (video_id,))
                 conn.commit()
-                print(f"  {video_id}: members-only, permanently skipped (attempts=5)")
+                print(f"  {video_id}: members-only/private, removed from DB")
             except Exception as e:
                 with conn.cursor() as cur:
                     cur.execute("""

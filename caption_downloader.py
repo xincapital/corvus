@@ -46,6 +46,11 @@ def is_members_only_error(error_message: str) -> bool:
         'channel membership',
         'private video',
         'this video is private',
+        'video unavailable',
+        'this video is unavailable',
+        'video is unavailable',
+        'video is private',
+        'sign in if you have been granted access',
     ]
 
     error_lower = str(error_message).lower()
@@ -112,91 +117,112 @@ def download_captions_with_supadata(video_url: str, output_dir: Path) -> Dict[st
     if not config.SUPADATA_KEYS:
         raise Exception("No Supadata API key found. Please set SUPADATA_KEYS in environment")
 
-    try:
-        api_key_used = random.choice(config.SUPADATA_KEYS)
-        supadata = Supadata(api_key=api_key_used)
+    keys = list(config.SUPADATA_KEYS)
+    random.shuffle(keys)
 
-        transcript = supadata.transcript(
-            url=video_url,
-            lang="en",
-            text=False,
-            mode="auto"
-        )
+    last_exception = None
 
-        if not isinstance(transcript, Transcript):
-            job_id = transcript.job_id
-            print(f"Async job {job_id[:8]}..., polling...", file=sys.stderr)
-            for _ in range(60):
-                time.sleep(5)
-                resp = httpx.get(
-                    f"https://api.supadata.ai/v1/transcript/{job_id}",
-                    headers={"x-api-key": api_key_used},
-                    timeout=30,
-                ).json()
-                status = resp.get("status")
-                if status == "completed":
-                    transcript = Transcript(**{k: v for k, v in resp.items() if k != "status"})
-                    break
-                elif status == "failed":
-                    raise Exception(f"Async transcript job failed")
-            else:
-                raise Exception(f"Async transcript job timed out after 300s")
+    for api_key_used in keys:
+        try:
+            supadata = Supadata(api_key=api_key_used)
 
-        content = transcript.content
+            transcript = supadata.transcript(
+                url=video_url,
+                lang="en",
+                text=False,
+                mode="auto"
+            )
 
-        print(f"Downloaded {len(content)} transcript segments", file=sys.stderr)
+            if not isinstance(transcript, Transcript):
+                job_id = transcript.job_id
+                print(f"Async job {job_id[:8]}..., polling...", file=sys.stderr)
+                for _ in range(60):
+                    time.sleep(5)
+                    resp = httpx.get(
+                        f"https://api.supadata.ai/v1/transcript/{job_id}",
+                        headers={"x-api-key": api_key_used},
+                        timeout=30,
+                    ).json()
+                    status = resp.get("status")
+                    if status == "completed":
+                        transcript = Transcript(**{k: v for k, v in resp.items() if k != "status"})
+                        break
+                    elif status == "failed":
+                        raise Exception(f"Async transcript job failed")
+                else:
+                    raise Exception(f"Async transcript job timed out after 300s")
 
-        transcript_chunks = [
-            {
-                'text': chunk.text,
-                'offset': chunk.offset,
-                'duration': chunk.duration,
-                'lang': chunk.lang
+            content = transcript.content
+
+            print(f"Downloaded {len(content)} transcript segments", file=sys.stderr)
+
+            transcript_chunks = [
+                {
+                    'text': chunk.text,
+                    'offset': chunk.offset,
+                    'duration': chunk.duration,
+                    'lang': chunk.lang
+                }
+                for chunk in content
+            ]
+
+            srt_content = supadata_to_srt(transcript_chunks)
+
+            caption_file = output_dir / f"{video_id}.en.supadata.srt"
+            with open(caption_file, 'w', encoding='utf-8') as f:
+                f.write(srt_content)
+
+            print(f"Saved SRT: {caption_file.name}", file=sys.stderr)
+
+            if parse_srt is not None:
+                try:
+                    subtitles = parse_srt(caption_file)
+                    compressed = compress_subtitles(subtitles, max_gap=2.0, max_chars=200)
+
+                    compressed_file = caption_file.parent / f"{caption_file.stem}_compressed.srt"
+                    write_srt(compressed, compressed_file)
+
+                    original_size = caption_file.stat().st_size
+                    compressed_size = compressed_file.stat().st_size
+                    reduction = (1 - compressed_size/original_size) * 100
+
+                    print(f"Compressed: {len(subtitles)} -> {len(compressed)} entries ({reduction:.1f}% size reduction)", file=sys.stderr)
+                    caption_file = compressed_file
+                except Exception as e:
+                    print(f"Compression failed: {e}. Using original file.", file=sys.stderr)
+
+            return {
+                'video_id': video_id,
+                'video_url': video_url,
+                'caption_file': str(caption_file),
             }
-            for chunk in content
-        ]
 
-        srt_content = supadata_to_srt(transcript_chunks)
+        except SupadataError as e:
+            error_msg = str(e)
+            if is_members_only_error(error_msg):
+                raise MembersOnlyError(f"Video is members-only content: {e}")
+            
+            error_code = getattr(e, 'error', '')
+            if error_code == 'limit-exceeded' or 'limit exceeded' in error_msg.lower() or 'plan usage limit' in error_msg.lower():
+                print(f"Supadata key {api_key_used[:6]}... limit exceeded, failing over to next key...", file=sys.stderr)
+                last_exception = e
+                continue
+            raise
 
-        caption_file = output_dir / f"{video_id}.en.supadata.srt"
-        with open(caption_file, 'w', encoding='utf-8') as f:
-            f.write(srt_content)
+        except Exception as e:
+            error_msg = str(e)
+            if is_members_only_error(error_msg):
+                raise MembersOnlyError(f"Video is members-only content: {e}")
+            error_code = getattr(e, 'error', '')
+            if error_code == 'limit-exceeded' or 'limit exceeded' in error_msg.lower() or 'plan usage limit' in error_msg.lower():
+                print(f"Supadata key {api_key_used[:6]}... limit exceeded, failing over to next key...", file=sys.stderr)
+                last_exception = e
+                continue
+            raise
 
-        print(f"Saved SRT: {caption_file.name}", file=sys.stderr)
-
-        if parse_srt is not None:
-            try:
-                subtitles = parse_srt(caption_file)
-                compressed = compress_subtitles(subtitles, max_gap=2.0, max_chars=200)
-
-                compressed_file = caption_file.parent / f"{caption_file.stem}_compressed.srt"
-                write_srt(compressed, compressed_file)
-
-                original_size = caption_file.stat().st_size
-                compressed_size = compressed_file.stat().st_size
-                reduction = (1 - compressed_size/original_size) * 100
-
-                print(f"Compressed: {len(subtitles)} -> {len(compressed)} entries ({reduction:.1f}% size reduction)", file=sys.stderr)
-                caption_file = compressed_file
-            except Exception as e:
-                print(f"Compression failed: {e}. Using original file.", file=sys.stderr)
-
-        return {
-            'video_id': video_id,
-            'video_url': video_url,
-            'caption_file': str(caption_file),
-        }
-
-    except SupadataError as e:
-        error_msg = str(e)
-        if is_members_only_error(error_msg):
-            raise MembersOnlyError(f"Video is members-only content: {e}")
-        raise
-
-    except Exception as e:
-        if is_members_only_error(str(e)):
-            raise MembersOnlyError(f"Video is members-only content: {e}")
-        raise
+    if last_exception:
+        raise last_exception
+    raise Exception("All Supadata keys failed")
 
 
 def _notegpt_chunks_to_srt(chunks: List[Dict[str, Any]]) -> str:

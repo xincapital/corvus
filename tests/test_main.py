@@ -258,6 +258,24 @@ class TestRetryNullTranscripts:
         ]
         assert len(increment_calls) == 4
 
+    def test_members_only_deletes_video_from_db(self):
+        """MembersOnlyError in retry → video deleted from DB."""
+        conn, cursor = _make_conn(null_candidates=["v_members_only"])
+
+        with patch("main.download_captions", side_effect=MembersOnlyError("members only")), \
+             patch("tempfile.TemporaryDirectory") as mock_tmp:
+            mock_tmp.return_value.__enter__ = MagicMock(return_value="/tmp/x")
+            mock_tmp.return_value.__exit__ = MagicMock(return_value=False)
+            retry_null_transcripts(conn, limit=None)
+
+        delete_calls = [
+            c for c in cursor.execute.call_args_list
+            if "DELETE FROM videos WHERE video_id" in c.args[0]
+        ]
+        assert len(delete_calls) == 1
+        assert delete_calls[0].args[1] == ("v_members_only",)
+        conn.commit.assert_called_once()
+
     def test_no_candidates_returns_early(self):
         """No NULL transcripts → download_captions never called."""
         conn, cursor = _make_conn(null_candidates=[])
