@@ -87,13 +87,13 @@ def main() -> None:
 
     conn = psycopg2.connect(config.DATABASE_URL)
     try:
-        check_video_ingestion_freshness(conn)
+        fresh = check_video_ingestion_freshness(conn)
         incomplete = scan_all_incomplete(conn)
         if not incomplete:
             print("[blog-monitor] All published blog posts have 11 locales. OK.")
         else:
             print(
-                f"[blog-monitor] {len(incomplete)} slug(s) have fewer than 11 locales:",
+                f"[blog-monitor] WARNING: {len(incomplete)} slug(s) have fewer than 11 locales:",
                 file=sys.stderr,
             )
             for row in incomplete:
@@ -104,8 +104,12 @@ def main() -> None:
                     file=sys.stderr,
                 )
             print(
-                f"\n[blog-monitor] Incomplete Slugs: {[r['slug'] for r in incomplete]}"
+                f"\n[blog-monitor] Incomplete Slugs: {[r['slug'] for r in incomplete]}",
+                file=sys.stderr,
             )
+
+        # Exit code 1 only if video ingestion has completely stalled
+        if not fresh:
             sys.exit(1)
     finally:
         conn.close()
@@ -113,3 +117,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
