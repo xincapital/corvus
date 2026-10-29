@@ -1,0 +1,57 @@
+name: Railway private database tunnel
+description: Connect to Postgres over SSH, verify SQL readiness, and export a local DATABASE_URL.
+inputs:
+  operation:
+    description: start or stop (use stop in an always() step)
+    default: start
+  api-token:
+    description: Railway account/workspace API token (not a project deployment token)
+  ssh-private-key:
+    description: Unencrypted private key whose public key is registered with the token's Railway account/workspace
+  project:
+    description: Railway project ID
+    default: 68cc7e8d-c378-4b49-9ce2-028518b9e96c
+  environment:
+    description: Railway environment ID
+    default: 9fd28028-9139-41f7-a098-27a5dbc97dae
+  service:
+    description: Database service name
+    default: Postgres
+  port:
+    description: Runner-local tunnel port
+    default: '15432'
+runs:
+  using: composite
+  steps:
+    - name: Validate tunnel credentials
+      if: inputs.operation == 'start'
+      shell: bash
+      env:
+        RAILWAY_API_TOKEN: ${{ inputs.api-token }}
+        RAILWAY_SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
+      run: |
+        test -n "$RAILWAY_API_TOKEN" || { echo '::error::Set the RAILWAY_API_TOKEN GitHub secret.'; exit 1; }
+        test -n "$RAILWAY_SSH_PRIVATE_KEY" || { echo '::error::Set the RAILWAY_SSH_PRIVATE_KEY GitHub secret.'; exit 1; }
+
+    - name: Install tunnel clients
+      if: inputs.operation == 'start'
+      shell: bash
+      run: |
+        npm install --prefix "$RUNNER_TEMP/briefvid-railway-cli" --no-audit --no-fund @railway/cli@5.71.0
+        echo "$RUNNER_TEMP/briefvid-railway-cli/node_modules/.bin" >> "$GITHUB_PATH"
+        if ! command -v psql >/dev/null; then
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+        fi
+
+    - name: Manage private database tunnel
+      shell: bash
+      env:
+        TUNNEL_OPERATION: ${{ inputs.operation }}
+        RAILWAY_API_TOKEN: ${{ inputs.api-token }}
+        RAILWAY_SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
+        RAILWAY_DB_PROJECT: ${{ inputs.project }}
+        RAILWAY_DB_ENVIRONMENT: ${{ inputs.environment }}
+        RAILWAY_DB_SERVICE: ${{ inputs.service }}
+        RAILWAY_DB_PORT: ${{ inputs.port }}
+      run: python3 "$GITHUB_ACTION_PATH/tunnel.py" "$TUNNEL_OPERATION"
