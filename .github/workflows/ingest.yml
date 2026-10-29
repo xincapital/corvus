@@ -1,13 +1,14 @@
 name: Ingest
 on:
   schedule:
-    - cron: '0 * * * *'
+    # Run every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -15,18 +16,42 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+          cache: 'pip'
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('requirements.txt') }}
+
       - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: python -m playwright install chromium --with-deps
+
+      - name: Install Playwright system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: python -m playwright install-deps chromium
+
+      - name: Open private database tunnel
+        uses: ./.github/actions/railway-db-tunnel
+        with:
+          api-token: ${{ secrets.RAILWAY_API_TOKEN }}
+          ssh-private-key: ${{ secrets.RAILWAY_SSH_PRIVATE_KEY }}
 
       - name: Run ingestion pipeline
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           YOUTUBE_DATA_API_KEYS: ${{ secrets.YOUTUBE_DATA_API_KEYS }}
           SUPADATA_KEYS: ${{ secrets.SUPADATA_KEYS }}
         run: python main.py
+
+      - name: Close private database tunnel
+        if: always()
+        uses: ./.github/actions/railway-db-tunnel
+        with:
+          operation: stop
